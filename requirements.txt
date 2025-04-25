@@ -18,3 +18,4 @@ ggplot2
 plotly
 DT
 rmarkdown
+stringdist

@@ -1,40 +1,24 @@
+library(jsonlite)
+library(DBI)
+source("src/db/connection_db.R")
+
+con_local <- NULL
+
 msg_handler <- function(bot, update) {
-  msg <- update$message
-  if (is.null(msg)) return()
+    msg <- update$message
+    if (is.null(msg) || is.null(msg$text)) return()
 
-  if (!is.null(msg$forward_from)) {
-    cat(sprintf(
-      "[Переслано от %s] %s\n",
-      msg$forward_from$first_name,
-      if (!is.null(msg$text)) msg$text else "[медиа]"
-    ))
-  } else {
-    sender <- if (!is.null(msg$from$username)) {
-      paste0("@", msg$from$username)
-    } else {
-      msg$from$first_name
+    if (is.null(con_local) || !DBI::dbIsValid(con_local)) {
+        con_local <<- get_db_con()
     }
-    cat(sprintf(
-      "[%s] %s\n",
-      sender,
-      if (!is.null(msg$text)) msg$text else "[медиа]"
-    ))
-  }
 
-  if (!is.null(msg$chat$title)) {
-    sender_name <- msg$from$first_name
-    sender_username <- if (!is.null(msg$from$username)) {
-      paste0("@", msg$from$username)
-    } else {
-      paste0("(", sender_name, ")")
-    }
-    cat(sprintf(
-      "[Группа: %s] Отправитель: %s\nСообщение: %s\n\n",
-      msg$chat$title,
-      sender_username,
-      if (!is.null(msg$text)) msg$text else "[медиа-файл]"
-    ))
-  }
+    u <- update
+    DBI::dbExecute(con_local,
+        "INSERT INTO raw_msgs(update_id, update_json)
+         VALUES($1, $2)
+         ON CONFLICT DO NOTHING",
+        list(u$update_id, toJSON(u, auto_unbox = TRUE))
+    )
 }
 
 handler <- MessageHandler(msg_handler)

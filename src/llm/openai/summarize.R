@@ -1,7 +1,6 @@
 library(DBI)
 library(dplyr)
 library(openai)
-
 source("src/db/connection_db.R")
 source("src/llm/connection_ai.R")
 

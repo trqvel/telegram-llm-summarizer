@@ -14,9 +14,9 @@ source("src/telegram/handlers/msg_handler.R")
 
 etl_and_ml <- function() {
   repeat {
-    source("src/etl/extract_data.R")
-    source("src/etl/transform_data.R")
-    source("src/etl/load_data.R")
+    source("src/db/etl/extract_data.R")
+    source("src/db/etl/transform_data.R")
+    source("src/db/etl/load_data.R")
     source("src/llm/openai/sentiment.R")
     source("src/llm/openai/summarize.R")
     source("src/llm/openai/gen_rss.R")

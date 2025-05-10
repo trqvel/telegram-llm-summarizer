@@ -2,7 +2,6 @@ library(DBI)
 library(RPostgres)
 library(dplyr)
 library(xml2)
-
 source("src/db/connection_db.R")
 
 con <- get_db_con()

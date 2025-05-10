@@ -1,7 +1,7 @@
 library(DBI)
 library(RPostgres)
 library(dplyr)
-source("src/db/connection.R")
+source("src/db/connection_db.R")
 
 con <- get_db_con()
 

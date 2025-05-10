@@ -4,7 +4,7 @@ library(dplyr)
 library(jsonlite)
 library(stringr)
 library(lubridate)
-source("src/db/connection.R")
+source("src/db/connection_db.R")
 
 con <- get_db_con()
 

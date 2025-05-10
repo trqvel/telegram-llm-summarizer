@@ -3,6 +3,7 @@ httr
 jsonlite
 stringr
 lubridate
+parallel
 DBI
 RPostgres
 dplyr

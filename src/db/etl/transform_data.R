@@ -3,6 +3,7 @@ library(RPostgres)
 library(dplyr)
 library(jsonlite)
 library(stringr)
+library(stringi)
 library(lubridate)
 source("src/db/connection_db.R")
 
@@ -41,7 +42,10 @@ if (nrow(raws) > 0) {
             ts         = as_datetime(m$date),
             text_raw   = m$text,
             text_clean = str_squish(
-                str_remove_all(str_remove_all(m$text, "<[^>]+>"), "https?://\\S+")
+                stringi::stri_replace_all_regex(
+                    str_remove_all(str_remove_all(m$text, "<[^>]+>"), "https?://\\S+"),
+                    "\\p{Emoji}", ""
+                )
             ),
             stringsAsFactors = FALSE
         )

@@ -7,7 +7,6 @@ lubridate
 DBI
 RPostgres
 dplyr
-openai
 xml2
 shiny
 shinydashboard
@@ -15,3 +14,4 @@ sodium
 DT
 parallelly
 future
+huggingfaceR

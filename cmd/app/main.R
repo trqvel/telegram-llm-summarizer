@@ -3,7 +3,7 @@ if (file.exists(".env")) readRenviron(".env")
 need <- c(
   "telegram.bot", "future", "parallelly", "DBI", "RPostgres",
   "dplyr", "stringr", "stringi", "lubridate", "jsonlite",
-  "openai", "xml2", "shiny", "shinydashboard", "sodium", "DT"
+  "huggingfaceR", "xml2", "shiny", "shinydashboard", "sodium", "DT"
 )
 miss <- need[!vapply(need, requireNamespace, logical(1), quietly = TRUE)]
 if (length(miss)) install.packages(miss, repos = "https://cloud.r-project.org")
@@ -11,8 +11,31 @@ if (length(miss)) install.packages(miss, repos = "https://cloud.r-project.org")
 library(telegram.bot)
 library(future)
 
-script_path <- normalizePath(sys.frame(1)$ofile)
-root_dir <- dirname(dirname(dirname(script_path)))
+find_root_dir <- function() {
+  current <- getwd()
+  
+  if (basename(current) == "app" && basename(dirname(current)) == "cmd") {
+    return(dirname(dirname(current)))
+  }
+  
+  if (basename(current) == "cmd") {
+    return(dirname(current))
+  }
+  
+  if (dir.exists(file.path(current, "src")) && dir.exists(file.path(current, "cmd"))) {
+    return(current)
+  }
+  
+  parent <- normalizePath(file.path(current, ".."))
+  if (dir.exists(file.path(parent, "src")) && dir.exists(file.path(parent, "cmd"))) {
+    return(parent)
+  }
+  
+  return(current)
+}
+
+root_dir <- find_root_dir()
+message("Используется корневая директория: ", root_dir)
 setwd(root_dir)
 
 token      <- Sys.getenv("TELEGRAM_BOT_TOKEN")
@@ -41,6 +64,6 @@ future({
 }, seed = FALSE)
 
 appDir <- file.path(root_dir, "src/app")
-message("Запуск Shiny по адресу: http://localhost:3838")
+message("Запуск Shiny по адресу: http://127.0.0.1:3838")
 options(shiny.autoreload = TRUE)
-shiny::runApp(appDir, host = "0.0.0.0", port = 3838)
+shiny::runApp(appDir, host = "127.0.0.1", port = 3838)

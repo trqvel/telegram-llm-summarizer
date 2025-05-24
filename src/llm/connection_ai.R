@@ -1,14 +1,19 @@
-library(openai)
+library(huggingfaceR)
 
-init_openai <- function() {
-    key <- Sys.getenv("OPENAI_API_KEY")
-    if (identical(key, "")) {
-        stop("OPENAI_API_KEY is not set in .env")
-    }
-    Sys.setenv(OPENAI_API_KEY = key)
-}
+.hf_token <- Sys.getenv("HF_API_TOKEN")
+if (identical(.hf_token, "")) stop("HF_API_TOKEN is not set in .env")
 
-get_openai <- function() {
-    init_openai()
-    create_openai(api_key = Sys.getenv("OPENAI_API_KEY"))
+.hf_model <- Sys.getenv(
+  "HF_MODEL_ID",
+  unset = "meta-llama/Llama-2-7b-chat-hf"
+)
+
+hf_complete <- function(prompt, max_tokens = 256) {
+  res <- hf_llm_completion(
+    model      = .hf_model,
+    inputs     = prompt,
+    parameters = list(max_new_tokens = max_tokens),
+    api_token  = .hf_token
+  )
+  trimws(res$generated_text)
 }

@@ -37,9 +37,9 @@ tryCatch({
         message(paste("Сообщение слишком короткое, пропускаем:", p$text_clean))
         dbExecute(con, "
           INSERT INTO sentiments(update_id, sentiment) 
-          VALUES($1, 'нейтральная') 
+          VALUES($1, $2) 
           ON CONFLICT DO NOTHING
-        ", params = list(p$update_id))
+        ", params = list(p$update_id, 'нейтральная'))
         next
       }
       
@@ -56,18 +56,20 @@ tryCatch({
         message(paste("Получен результат:", sentiment))
         
         if (grepl("положит", sentiment)) {
-          sentiment <- "положительная"
+          sentiment_value <- "положительная"
         } else if (grepl("отриц|негатив", sentiment)) {
-          sentiment <- "отрицательная" 
+          sentiment_value <- "отрицательная" 
         } else {
-          sentiment <- "нейтральная"
+          sentiment_value <- "нейтральная"
         }
+        
+        message(paste("Итоговая тональность:", sentiment_value))
         
         dbExecute(con, "
           INSERT INTO sentiments(update_id, sentiment)
           VALUES($1, $2) 
           ON CONFLICT DO NOTHING
-        ", params = list(p$update_id, sentiment))
+        ", params = list(p$update_id, sentiment_value))
         
         success_count <- success_count + 1
       }, error = function(e) {

@@ -37,6 +37,21 @@ check_raw_msgs_table <- function(con) {
 
 msg_handler <- function(bot, update) {
     message(paste0("Получено обновление с ID: ", update$update_id))
+    
+    debug_dir <- file.path(getwd(), "logs")
+    if (!dir.exists(debug_dir)) {
+        dir.create(debug_dir, recursive = TRUE)
+    }
+    debug_file <- file.path(debug_dir, paste0("update_", update$update_id, ".json"))
+    update_json_raw <- toJSON(update, auto_unbox = TRUE, pretty = TRUE)
+    writeLines(update_json_raw, debug_file)
+    message(paste0("Сохранено отладочное обновление в ", debug_file))
+    
+    if (is.null(update$message)) {
+        message("Обновление не содержит сообщения, пропускаем")
+        return()
+    }
+    
     msg <- update$message
     if (is.null(msg) || is.null(msg$text)) {
         message("Обновление не содержит текстового сообщения, пропускаем")
@@ -48,8 +63,17 @@ msg_handler <- function(bot, update) {
 
     if (is.null(con_local) || !DBI::dbIsValid(con_local)) {
         message("Создаем новое подключение к БД")
-        con_local <<- get_db_con()
-        has_processed <- check_raw_msgs_table(con_local)
+        tryCatch({
+            con_local <<- get_db_con()
+            has_processed <- check_raw_msgs_table(con_local)
+            if (!has_processed) {
+                message("ОШИБКА: Не удалось корректно настроить таблицу raw_msgs")
+                return()
+            }
+        }, error = function(e) {
+            message(paste0("КРИТИЧЕСКАЯ ОШИБКА при подключении к БД: ", e$message))
+            return()
+        })
     }
 
     update_data <- list(
@@ -73,7 +97,9 @@ msg_handler <- function(bot, update) {
     )
     
     update_json <- tryCatch({
-        toJSON(update_data, auto_unbox = TRUE)
+        json_text <- toJSON(update_data, auto_unbox = TRUE)
+        message(paste0("JSON успешно создан: ", substr(json_text, 1, 100), "..."))
+        json_text
     }, error = function(e) {
         message(paste("ОШИБКА при преобразовании в JSON:", e$message))
         return(NULL)
@@ -90,26 +116,53 @@ msg_handler <- function(bot, update) {
         has_processed_column <- "processed" %in% cols$column_name
         
         if (has_processed_column) {
-            DBI::dbExecute(con_local,
+            result <- DBI::dbExecute(con_local,
                 "INSERT INTO raw_msgs(update_id, update_json, processed)
                 VALUES($1, $2, FALSE)
                 ON CONFLICT (update_id) DO NOTHING",
                 list(update$update_id, update_json)
             )
         } else {
-            DBI::dbExecute(con_local,
+            result <- DBI::dbExecute(con_local,
                 "INSERT INTO raw_msgs(update_id, update_json)
                 VALUES($1, $2)
                 ON CONFLICT (update_id) DO NOTHING",
                 list(update$update_id, update_json)
             )
         }
-        message(paste0("Запись успешно добавлена в БД, update_id: ", update$update_id))
+        
+        message(paste0("Результат вставки в БД: ", result, " строк"))
+        
+        check <- dbGetQuery(con_local, "SELECT COUNT(*) as count FROM raw_msgs WHERE update_id = $1", 
+                           list(update$update_id))
+        if (check$count > 0) {
+            message(paste0("Запись с update_id ", update$update_id, " успешно добавлена в БД"))
+            
+            stat <- dbGetQuery(con_local, "
+                SELECT 
+                    (SELECT COUNT(*) FROM raw_msgs) as raw_count,
+                    (SELECT COUNT(*) FROM clean_msgs) as clean_count
+            ")
+            message(paste0("Статистика БД после вставки: raw_msgs: ", stat$raw_count, 
+                          " clean_msgs: ", stat$clean_count))
+        } else {
+            message(paste0("ПРЕДУПРЕЖДЕНИЕ: Запись с update_id ", update$update_id, " не найдена в БД после вставки"))
+        }
+        
         TRUE
     }, error = function(e) {
         message(paste0("ОШИБКА при записи в БД: ", e$message))
+        print(traceback())
         FALSE
     })
+    
+    if (result) {
+        tryCatch({
+            bot$sendMessage(chat_id = msg$chat$id, text = "Сообщение получено и сохранено")
+        }, error = function(e) {
+            message(paste0("ОШИБКА при отправке ответа: ", e$message))
+        })
+    }
 }
 
 handler <- MessageHandler(msg_handler)

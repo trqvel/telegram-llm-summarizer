@@ -14,19 +14,36 @@ get_db_con <- function() {
   
   message(paste("Подключение к БД:", user, "@", host, ":", port, "/", dbname))
   
-  con <- DBI::dbConnect(
-    RPostgres::Postgres(),
-    host     = host,
-    port     = port,
-    user     = user,
-    password = pass,
-    dbname   = dbname,
-    options  = "-c client_encoding=UTF8"
-  )
+  max_attempts <- 3
   
-  DBI::dbExecute(con, "SET client_encoding = 'UTF8'")
-  DBI::dbExecute(con, "SET names 'UTF8'")
-  
-  message("Подключение к БД успешно установлено")
-  return(con)
+  for (attempt in 1:max_attempts) {
+    tryCatch({
+      con <- DBI::dbConnect(
+        RPostgres::Postgres(),
+        host     = host,
+        port     = port,
+        user     = user,
+        password = pass,
+        dbname   = dbname,
+        options  = "-c client_encoding=UTF8",
+        connect_timeout = 10
+      )
+
+      DBI::dbExecute(con, "SET client_encoding = 'UTF8'")
+      DBI::dbExecute(con, "SET standard_conforming_strings = ON")
+      DBI::dbExecute(con, "SET names 'UTF8'")
+      DBI::dbExecute(con, "SET datestyle = 'ISO, MDY'")
+      
+      message("Подключение к БД успешно установлено")
+      return(con)
+    }, error = function(e) {
+      message(paste("Попытка", attempt, "из", max_attempts, "- Ошибка подключения:", e$message))
+      
+      if (attempt == max_attempts) {
+        stop(paste("Не удалось подключиться к БД после", max_attempts, "попыток:", e$message))
+      }
+
+      Sys.sleep(2)
+    })
+  }
 }

@@ -72,6 +72,16 @@ initialize_db <- function() {
   dbDisconnect(con)
 }
 
+set_utf8 <- function(df) {
+  if (nrow(df) == 0) return(df)
+  
+  char_columns <- sapply(df, is.character)
+  for (col in names(df)[char_columns]) {
+    Encoding(df[[col]]) <- "UTF-8"
+  }
+  return(df)
+}
+
 ui <- function(req) {
   if (is.null(isolate(user()))) {
     fluidPage(
@@ -195,6 +205,26 @@ ui <- function(req) {
                                   start = Sys.Date()-7, end = Sys.Date())
                   )
                 )
+              ),
+              div(class = "col-md-8",
+                div(class = "box box-success",
+                  div(class = "box-header", h3(class = "box-title", "Управление данными")),
+                  div(class = "box-body",
+                    div(class = "row",
+                      div(class = "col-md-6",
+                        h4("Статистика базы данных:"),
+                        tableOutput("db_stats")
+                      ),
+                      div(class = "col-md-6",
+                        br(),
+                        actionButton("refresh_data", "Обновить данные", 
+                                    icon = icon("sync"), class = "btn-primary"),
+                        br(), br(),
+                        p("Нажмите для принудительного запуска ETL процесса")
+                      )
+                    )
+                  )
+                )
               )
             ),
             div(class = "row",
@@ -256,6 +286,55 @@ ui <- function(req) {
 server <- function(input, output, session) {
   
   initialize_db()
+  
+  autoInvalidate <- reactiveTimer(10000)
+  
+  observe({
+    autoInvalidate()
+    message("Автоматическое обновление данных...")
+    
+    if (is.null(user())) return()
+    
+    if (input$tabs == "stats") {
+      output$tbl_stats <- renderDT({})
+      output$sentiment_plot <- renderPlotly({})
+      output$activity_plot <- renderPlotly({})
+      output$summaries_table <- renderDT({})
+    }
+  })
+  
+  check_db_data <- function() {
+    tryCatch({
+      con <- get_db_con()
+      
+      stats <- list()
+      
+      stats$raw_msgs <- dbGetQuery(con, "SELECT COUNT(*) AS count FROM raw_msgs")[1,1]
+      stats$clean_msgs <- dbGetQuery(con, "SELECT COUNT(*) AS count FROM clean_msgs")[1,1]
+      stats$sentiments <- dbGetQuery(con, "SELECT COUNT(*) AS count FROM sentiments")[1,1]
+      stats$summaries <- dbGetQuery(con, "SELECT COUNT(*) AS count FROM summaries")[1,1]
+      
+      dbDisconnect(con)
+      
+      message(paste(
+        "Статистика БД:",
+        "raw_msgs:", stats$raw_msgs,
+        "clean_msgs:", stats$clean_msgs,
+        "sentiments:", stats$sentiments,
+        "summaries:", stats$summaries
+      ))
+      
+      return(stats)
+    }, error = function(e) {
+      message(paste("Ошибка при проверке данных БД:", e$message))
+      return(NULL)
+    })
+  }
+  
+  observe({
+    autoInvalidate()
+    check_db_data()
+  })
   
   observeEvent(input$logout, {
     user(NULL)
@@ -323,6 +402,8 @@ server <- function(input, output, session) {
       df <- data.frame(chat_id = character(0))
     }
     
+    df <- set_utf8(df)
+    
     datatable(df,
       colnames = c("ID/Имя группы"),
       options = list(
@@ -346,6 +427,8 @@ server <- function(input, output, session) {
   output$tbl_stats <- renderDT({
     req(user())
     rng <- input$dr
+    
+    invalidateLater(15000)
     
     tryCatch({
       con <- get_db_con()
@@ -373,6 +456,7 @@ server <- function(input, output, session) {
         )
       }
       
+      df <- set_utf8(df)
       colnames(df) <- c("ID группы", "Сообщений", "Авторов")
       df
     }, error = function(e) {
@@ -402,6 +486,8 @@ server <- function(input, output, session) {
     req(user())
     rng <- input$dr
     
+    invalidateLater(15000)
+    
     tryCatch({
       con <- get_db_con()
       df <- dbGetQuery(con, "
@@ -422,6 +508,8 @@ server <- function(input, output, session) {
                layout(title = "Нет данных для отображения"))
       }
       
+      df <- set_utf8(df)
+      
       colors <- c("положительная" = "#28a745", 
                   "нейтральная" = "#ffc107", 
                   "отрицательная" = "#dc3545")
@@ -441,6 +529,8 @@ server <- function(input, output, session) {
   output$activity_plot <- renderPlotly({
     req(user())
     rng <- input$dr
+    
+    invalidateLater(15000)
     
     tryCatch({
       con <- get_db_con()
@@ -479,6 +569,8 @@ server <- function(input, output, session) {
   output$summaries_table <- renderDT({
     req(user())
     
+    invalidateLater(15000)
+    
     tryCatch({
       con <- get_db_con()
       df <- dbGetQuery(con, "
@@ -500,6 +592,7 @@ server <- function(input, output, session) {
       }
       
       df$period_start <- format(as.POSIXct(df$period_start), "%Y-%m-%d %H:%M")
+      df <- set_utf8(df)
       colnames(df) <- c("ID группы", "Период", "Сводка")
       df
     }, error = function(e) {
@@ -518,6 +611,49 @@ server <- function(input, output, session) {
       info = "Записи с _START_ до _END_ из _TOTAL_"
     )
   ))
+
+  output$db_stats <- renderTable({
+    invalidateLater(10000)
+    
+    tryCatch({
+      con <- get_db_con()
+      stat <- dbGetQuery(con, "
+        SELECT 
+          (SELECT COUNT(*) FROM raw_msgs) as raw_count,
+          (SELECT COUNT(*) FROM clean_msgs) as clean_count,
+          (SELECT COUNT(*) FROM sentiments) as sent_count,
+          (SELECT COUNT(*) FROM summaries) as summ_count
+      ")
+      dbDisconnect(con)
+      
+      data.frame(
+        Таблица = c("Сырые сообщения", "Обработанные сообщения", "Тональности", "Сводки"),
+        Количество = c(stat$raw_count, stat$clean_count, stat$sent_count, stat$summ_count)
+      )
+    }, error = function(e) {
+      data.frame(
+        Таблица = c("Ошибка"),
+        Количество = c("Не удалось получить статистику")
+      )
+    })
+  }, striped = TRUE, hover = TRUE, align = "c", width = "100%")
+  
+  observeEvent(input$refresh_data, {
+    showNotification("Запуск ETL процесса...", type = "message")
+    
+    tryCatch({
+      source(file.path(root_dir, "src/db/etl/extract_data.R"))
+      source(file.path(root_dir, "src/db/etl/transform_data.R"))
+      source(file.path(root_dir, "src/db/etl/load_data.R"))
+      source(file.path(root_dir, "src/llm/llama/sentiment.R"))
+      source(file.path(root_dir, "src/llm/llama/summarize.R"))
+      source(file.path(root_dir, "src/llm/llama/gen_rss.R"))
+      
+      showNotification("ETL процесс успешно завершен", type = "message")
+    }, error = function(e) {
+      showNotification(paste("Ошибка ETL:", e$message), type = "error")
+    })
+  })
 }
 
 shinyApp(ui, server)

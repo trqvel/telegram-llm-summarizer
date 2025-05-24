@@ -10,7 +10,7 @@ dplyr
 xml2
 shiny
 shinydashboard
-sodium
+openssl
 DT
 parallelly
 future

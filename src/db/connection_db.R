@@ -7,7 +7,14 @@ get_db_con <- function() {
   user   <- Sys.getenv("DB_USER")
   pass   <- Sys.getenv("DB_PASS")
   dbname <- Sys.getenv("DB_NAME")
-  DBI::dbConnect(
+  
+  if (nchar(host) == 0 || nchar(user) == 0 || nchar(pass) == 0 || nchar(dbname) == 0) {
+    stop("Отсутствуют необходимые параметры подключения к БД. Проверьте переменные окружения.")
+  }
+  
+  message(paste("Подключение к БД:", user, "@", host, ":", port, "/", dbname))
+  
+  con <- DBI::dbConnect(
     RPostgres::Postgres(),
     host     = host,
     port     = port,
@@ -15,4 +22,7 @@ get_db_con <- function() {
     password = pass,
     dbname   = dbname
   )
+  
+  message("Подключение к БД успешно установлено")
+  return(con)
 }

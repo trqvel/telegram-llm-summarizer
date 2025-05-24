@@ -1,39 +1,69 @@
 library(shiny)
 library(DBI)
 library(RPostgres)
-library(sodium)
+library(openssl)
 
 root_dir <- normalizePath(file.path(dirname(getwd()), ".."))
 source(file.path(root_dir, "src/db/connection_db.R"))
 
-register_ui <- function(id) {
+reg_ui <- function(id) {
   ns <- NS(id)
-  tagList(
-    h2("Регистрация"),
-    textInput(ns("login"),  "Логин"),
-    passwordInput(ns("pwd"),  "Пароль"),
-    passwordInput(ns("pwd2"), "Повтор пароля"),
-    actionButton(ns("submit"), "Создать аккаунт"),
-    br(), verbatimTextOutput(ns("msg"))
+  div(class = "auth-form",
+    div(class = "form-group",
+      textInput(ns("login"), "Логин", 
+                placeholder = "Придумайте имя пользователя",
+                width = "100%")
+    ),
+    div(class = "form-group",
+      passwordInput(ns("pwd"), "Пароль", 
+                    placeholder = "Придумайте пароль",
+                    width = "100%")
+    ),
+    div(class = "form-group",
+      passwordInput(ns("pwd2"), "Повтор пароля", 
+                    placeholder = "Повторите пароль",
+                    width = "100%")
+    ),
+    div(class = "form-group",
+      actionButton(ns("submit"), "Создать аккаунт", 
+                  class = "btn-primary btn-block",
+                  width = "100%")
+    ),
+    uiOutput(ns("msg_ui"))
   )
 }
 
-register_server <- function(id) {
+reg_server <- function(id, session) {
   moduleServer(id, function(input, output, session) {
-
-    output$msg <- renderText({
-      req(rv$msg)
-      rv$msg
+    
+    rv <- reactiveValues(msg = NULL, msg_type = NULL)
+    
+    output$msg_ui <- renderUI({
+      if (!is.null(rv$msg)) {
+        div(class = paste0("alert alert-", rv$msg_type), 
+            if(rv$msg_type == "danger") icon("exclamation-circle") else icon("check-circle"),
+            rv$msg)
+      }
     })
-
-    rv <- reactiveValues(msg = NULL)
-
+    
     observeEvent(input$submit, {
-      validate(
-        need(nchar(input$login)  > 0, "Введите логин"),
-        need(nchar(input$pwd)    > 0, "Введите пароль"),
-        need(input$pwd == input$pwd2, "Пароли не совпадают")
-      )
+      if (nchar(input$login) == 0) {
+        rv$msg <- "Введите логин"
+        rv$msg_type <- "danger"
+        return()
+      }
+      
+      if (nchar(input$pwd) == 0) {
+        rv$msg <- "Введите пароль"
+        rv$msg_type <- "danger"
+        return()
+      }
+      
+      if (input$pwd != input$pwd2) {
+        rv$msg <- "Пароли не совпадают"
+        rv$msg_type <- "danger"
+        return()
+      }
 
       con <- get_db_con()
       dbExecute(con, "
@@ -43,20 +73,48 @@ register_server <- function(id) {
           password_hash TEXT
         )
       ")
-      hash_hex <- sodium::bin2hex(
-        sodium::password_store(charToRaw(input$pwd))
-      )
+      
+      hash <- tryCatch({
+        salt <- openssl::rand_bytes(16)
+        salted_pwd <- paste0(input$pwd, openssl::base64_encode(salt))
+        hash_result <- openssl::sha256(salted_pwd)
+        paste0(
+          openssl::base64_encode(salt),
+          "$",
+          hash_result
+        )
+      }, error = function(e) {
+        rv$msg <- "Ошибка при хешировании пароля"
+        rv$msg_type <- "danger"
+        return(NULL)
+      })
+      
+      if (is.null(hash)) {
+        dbDisconnect(con)
+        return()
+      }
 
       ok <- tryCatch({
         dbExecute(con,
           "INSERT INTO users(username, password_hash) VALUES($1,$2)",
-          params = list(input$login, hash_hex)
+          params = list(input$login, hash)
         )
         TRUE
       }, error = function(e) FALSE)
 
       dbDisconnect(con)
-      rv$msg <- if (ok) "Аккаунт создан — войдите." else "Такой логин уже существует."
+      
+      if (ok) {
+        rv$msg <- "Аккаунт успешно создан! Теперь вы можете войти."
+        rv$msg_type <- "success"
+        updateTextInput(session, "login", value = "")
+        updateTextInput(session, "pwd", value = "")
+        updateTextInput(session, "pwd2", value = "")
+        session$sendCustomMessage("switchToLogin", TRUE)
+      } else {
+        rv$msg <- "Логин уже занят. Пожалуйста, выберите другой."
+        rv$msg_type <- "danger"
+      }
     })
   })
 }

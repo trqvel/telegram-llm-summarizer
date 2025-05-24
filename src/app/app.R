@@ -3,6 +3,9 @@ library(shinydashboard)
 library(DT)
 library(DBI)
 library(RPostgres)
+library(ggplot2)
+library(plotly)
+library(lubridate)
 
 root_dir <- normalizePath(file.path(dirname(getwd()), ".."))
 source(file.path(root_dir, "src/app/auth.R"))
@@ -203,6 +206,28 @@ ui <- function(req) {
               )
             ),
             div(class = "row",
+              div(class = "col-md-6",
+                div(class = "box box-success",
+                  div(class = "box-header", h3(class = "box-title", "Тональность сообщений")),
+                  div(class = "box-body", plotlyOutput("sentiment_plot"))
+                )
+              ),
+              div(class = "col-md-6", 
+                div(class = "box box-warning",
+                  div(class = "box-header", h3(class = "box-title", "Активность по времени")),
+                  div(class = "box-body", plotlyOutput("activity_plot"))
+                )
+              )
+            ),
+            div(class = "row",
+              div(class = "col-md-12",
+                div(class = "box box-primary", 
+                  div(class = "box-header", h3(class = "box-title", "Последние сводки")),
+                  div(class = "box-body", DTOutput("summaries_table"))
+                )
+              )
+            ),
+            div(class = "row",
               div(class = "col-md-12",
                 div(class = "box box-info",
                   div(class = "box-header", h3(class = "box-title", "Информация")),
@@ -370,6 +395,127 @@ server <- function(input, output, session) {
         "next" = "Следующая",
         previous = "Предыдущая"
       )
+    )
+  ))
+  
+  output$sentiment_plot <- renderPlotly({
+    req(user())
+    rng <- input$dr
+    
+    tryCatch({
+      con <- get_db_con()
+      df <- dbGetQuery(con, "
+        SELECT s.sentiment, COUNT(*) as count
+        FROM sentiments s
+        JOIN clean_msgs c ON s.update_id = c.update_id
+        JOIN user_groups g ON g.chat_id::bigint = c.chat_id
+        WHERE g.user_id = $1
+          AND c.ts BETWEEN $2 AND $3
+        GROUP BY s.sentiment
+      ", params = list(user()$id,
+                       as.character(rng[1]),
+                       as.character(rng[2])))
+      dbDisconnect(con)
+      
+      if (nrow(df) == 0) {
+        return(plotly_empty(type = "pie") %>% 
+               layout(title = "Нет данных для отображения"))
+      }
+      
+      colors <- c("положительная" = "#28a745", 
+                  "нейтральная" = "#ffc107", 
+                  "отрицательная" = "#dc3545")
+      
+      plot_ly(df, labels = ~sentiment, values = ~count, 
+              type = 'pie',
+              marker = list(colors = colors[df$sentiment]),
+              textinfo = 'label+percent') %>%
+        layout(title = "Распределение тональности сообщений",
+               showlegend = TRUE)
+    }, error = function(e) {
+      plotly_empty(type = "pie") %>% 
+        layout(title = paste("Ошибка загрузки данных:", e$message))
+    })
+  })
+  
+  output$activity_plot <- renderPlotly({
+    req(user())
+    rng <- input$dr
+    
+    tryCatch({
+      con <- get_db_con()
+      df <- dbGetQuery(con, "
+        SELECT date_trunc('hour', c.ts) as hour, COUNT(*) as count
+        FROM clean_msgs c
+        JOIN user_groups g ON g.chat_id::bigint = c.chat_id
+        WHERE g.user_id = $1
+          AND c.ts BETWEEN $2 AND $3
+        GROUP BY hour
+        ORDER BY hour
+      ", params = list(user()$id,
+                       as.character(rng[1]),
+                       as.character(rng[2])))
+      dbDisconnect(con)
+      
+      if (nrow(df) == 0) {
+        return(plotly_empty() %>% 
+               layout(title = "Нет данных для отображения"))
+      }
+      
+      df$hour <- as.POSIXct(df$hour)
+      
+      plot_ly(df, x = ~hour, y = ~count, type = 'scatter', mode = 'lines+markers',
+              line = list(color = '#1976D2'),
+              marker = list(color = '#1976D2')) %>%
+        layout(title = "Активность по часам",
+               xaxis = list(title = "Время"),
+               yaxis = list(title = "Количество сообщений"))
+    }, error = function(e) {
+      plotly_empty() %>% 
+        layout(title = paste("Ошибка загрузки данных:", e$message))
+    })
+  })
+  
+  output$summaries_table <- renderDT({
+    req(user())
+    
+    tryCatch({
+      con <- get_db_con()
+      df <- dbGetQuery(con, "
+        SELECT s.chat_id, s.period_start, s.summary
+        FROM summaries s
+        JOIN user_groups g ON g.chat_id::bigint = s.chat_id
+        WHERE g.user_id = $1
+        ORDER BY s.period_start DESC
+        LIMIT 10
+      ", params = list(user()$id))
+      dbDisconnect(con)
+      
+      if (nrow(df) == 0) {
+        df <- data.frame(
+          chat_id = character(0),
+          period_start = character(0),
+          summary = character(0)
+        )
+      }
+      
+      df$period_start <- format(as.POSIXct(df$period_start), "%Y-%m-%d %H:%M")
+      colnames(df) <- c("ID группы", "Период", "Сводка")
+      df
+    }, error = function(e) {
+      data.frame(
+        `ID группы` = character(0),
+        `Период` = character(0),
+        `Сводка` = character(0)
+      )
+    })
+  }, options = list(
+    pageLength = 5,
+    language = list(
+      search = "Поиск:",
+      emptyTable = "Нет данных для отображения",
+      lengthMenu = "Показать _MENU_ записей",
+      info = "Записи с _START_ до _END_ из _TOTAL_"
     )
   ))
 }

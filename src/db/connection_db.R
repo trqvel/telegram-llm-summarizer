@@ -20,8 +20,12 @@ get_db_con <- function() {
     port     = port,
     user     = user,
     password = pass,
-    dbname   = dbname
+    dbname   = dbname,
+    options  = "-c client_encoding=UTF8"
   )
+  
+  DBI::dbExecute(con, "SET client_encoding = 'UTF8'")
+  DBI::dbExecute(con, "SET names 'UTF8'")
   
   message("Подключение к БД успешно установлено")
   return(con)

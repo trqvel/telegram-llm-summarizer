@@ -15,3 +15,5 @@ DT
 parallelly
 future
 huggingfaceR
+ggplot2
+plotly
